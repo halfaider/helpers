@@ -74,7 +74,7 @@ def set_logger(
             },
         },
         "loggers": {
-            __package__.split('.')[0]: {
+            (__package__ or __name__).split(".")[0]: {
                 "level": getattr(logging, (level or "info").upper(), logging.INFO),
                 "handlers": ["console"],
                 "propagate": False,

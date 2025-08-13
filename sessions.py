@@ -15,9 +15,7 @@ DEFAULT_HEADERS = {
 
 class HelperSession(requests.Session):
 
-    def __init__(
-        self, headers: dict = None, auth: tuple = None, proxies: dict = None
-    ) -> None:
+    def __init__(self, headers: dict = None, auth: tuple = None, proxies: dict = None) -> None:
         super().__init__()
         self.headers.update(DEFAULT_HEADERS)
         if headers:
