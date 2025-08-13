@@ -229,7 +229,7 @@ def set_logger(
             },
         },
         "loggers": {
-            __package__: {
+            'gd_poller': {
                 "level": getattr(logging, (level or "info").upper(), logging.INFO),
                 "handlers": ["console"],
                 "propagate": False,
