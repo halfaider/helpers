@@ -1,16 +1,23 @@
+import os
 import re
+import sys
 import copy
 import time
 import logging
 import logging.config
 import asyncio
-import pathlib
 import functools
 import traceback
 import threading
 import subprocess
+from pathlib import Path
 from typing import Any, Iterable, Callable, Sequence
 
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    YamlConfigSettingsSource,
+)
 import requests
 
 logger = logging.getLogger(__name__)
@@ -18,6 +25,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
 }
+
+
+def check_packages(packages: Iterable[Sequence[str]]) -> None:
+    for pkg, pi in packages:
+        try:
+            __import__(pkg)
+        except Exception as e:
+            print(repr(e))
+            subprocess.check_call((sys.executable, "-m", "pip", "install", "-U", pi))
 
 
 def not_none(value: Any, default: Any) -> Any:
@@ -150,7 +166,7 @@ async def await_sync(func: Callable, *args: Any, **kwds: Any) -> Any:
 
 
 def get_last_dir(path_: str, is_dir: bool = False) -> str:
-    return path_ if is_dir else str(pathlib.Path(path_).parent)
+    return path_ if is_dir else str(Path(path_).parent)
 
 
 def apply_cache(func: Callable, maxsize: int = 64) -> Callable:
@@ -280,3 +296,70 @@ def deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+class MergedYamlSettingsSource(YamlConfigSettingsSource):
+    """
+    사용자 yaml 설정값을 기본값과 병합하는 클래스
+    """
+
+    def __call__(self) -> dict[str, Any]:
+        user_config = super().__call__()
+        default_config = {}
+        for field_name, field in self.settings_cls.model_fields.items():
+            if field.default_factory:
+                default_config[field_name] = field.default_factory()
+        if not user_config:
+            return default_config
+        return deep_merge(default_config, user_config)
+
+    def _read_files(self, files: str | os.PathLike | None) -> dict[str, Any]:
+        if files is None:
+            return {}
+        if isinstance(files, (str, os.PathLike)):
+            files = [files]
+        vars: dict[str, Any] = {}
+        for file in files:
+            file_path = Path(file).expanduser()
+            if file_path.is_file():
+                vars.update(self._read_file(file_path))
+                logger.warning(f"'{file_path.resolve()}' 파일을 불러왔습니다.")
+                # 존재하는 첫번째 파일만 로딩
+                break
+        else:
+            logger.error(f"설정 파일을 불러올 수 없습니다: {files}")
+        return vars
+
+
+class _BaseSettings(BaseSettings):
+    """
+    사용자의 설정값을 저장하는 클래스
+    """
+
+    model_config = None
+
+    def __init__(
+        self, *args: Any, user_yaml_file: str | os.PathLike | None = None, **kwds: Any
+    ) -> None:
+        if user_yaml_file:
+            self.model_config["yaml_file"] = user_yaml_file
+        super().__init__(*args, **kwds)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        merged_yaml_settings = MergedYamlSettingsSource(settings_cls)
+        # 설정값 적용 순서
+        return (
+            init_settings,
+            merged_yaml_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
